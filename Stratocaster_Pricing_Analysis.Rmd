@@ -1,0 +1,140 @@
+---
+title: "Fender Stratocaster Pricing Analysis"
+author: "Thomas Ray"
+date: "December 8, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=F}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readr)
+library(stringr)
+library(Hmisc)
+library(ggplot2)
+
+#load data
+gdata <- read_tsv('clean_guitar_data.txt')
+gtbl <- as.tbl(gdata)
+
+# Also look at strats < $3000 -
+pricetbl <- gtbl %>% filter(price < 3000)
+
+```
+
+For this project I wanted to look into how certain electric guitars are priced on the secondhand market. I decided to explore pricing for Fender Stratocasters, a popular, workhorse instrument that has a wide variation of prices and models. The data used was scraped from Reverb.com using Beautiful Soup and Selenium in Python. Reverb is an instrument selling site popular with both independent sellers and music shops. Information on 812 guitars was retrieved. I decided to only use guitars that were priced under $3000 and ended up with 592 observation. This removed outliers and keeps things in a more reasonable price range for the average player. I was able to collect eight variables for the guitars, but here's a look at the that ones I used in this analysis. They're fairly self-explanatory, but I will explain more as we take a deeper look at them.
+
+```{r intro, echo = F}
+pricetbl %>% select(title,condition,new.finish,age,price) %>% head
+```
+
+
+## Price and Age
+
+The first variable I was interested in was the age of the guitars. Intuitively, I thought that there would be a positive linear relationship between the price and age of guitars, as older ones generally become more valuable to collectors and players that want well-worn guitars. Here's a quick look at these variables:
+
+```{r densities, echo= F, warning=F, fig.align='center', fig.height=4}
+plot1 <- ggplot(pricetbl, aes(age)) +
+  geom_density()+
+  theme_minimal()+
+  labs(title='Age Density',
+       subtitle = 'with median indicator',
+       x = 'Age',
+       y = 'Density') +
+  geom_vline(aes(xintercept=median(pricetbl$age, na.rm=T)))
+
+plot2 <- ggplot(pricetbl, aes(price)) +
+  geom_density()+
+  theme_minimal()+
+  labs(title='Price Density',
+       subtitle = 'with median indicator',
+       x = 'Price',
+       y = 'Density') +
+  geom_vline(aes(xintercept=median(pricetbl$price)))
+
+gridExtra::grid.arrange(plot1,plot2,ncol=2)
+```
+
+Here we can see a scatter plot showing the relationship between age and price. Adding a loess smoothed line highlights the non-linear relationship of these variables. We can see that older guitars tend to be more valuable after a certain point, but we'll see if we can back that up statistically. 
+
+```{r scatter, echo=F, warning=F}
+ggplot(pricetbl, aes(x=age, y=(price))) + 
+  geom_point(shape=1) + 
+  theme_minimal() +
+  geom_smooth(method = "loess", se = F) + 
+  labs(x="Age", 
+         y="Price", 
+         title="Scatterplot")
+
+```
+
+In order to see how much the age of a guitar influences the price, I decided to create a polynomial regression model. We can see in the results below that the coefficients and the F-statistic are statistically significant. We also have an R-squared of .346. It's noteworthy that age can explain almost 35% of the variance in price while there are many other factors, both physical and intangible, that go into purchasing an instrument. Looking at this model along side the scatter plot, it appears that there might be a threshold around 20 years-old where, all else remaining constant, age becomes a bigger factor in the price and a guitar might gain the desirable 'vintage' characteristic. 
+
+```{r poly regression}
+model <- lm(price ~ age + I(age^2), data = pricetbl)
+summary(model)
+
+```
+
+## Finish and Price Variables
+
+Another variable I wanted to explore is the finish of the guitars. While playablity, age, and quality of instrument play a large role in determining price, the aesthetics of the guitar also need to be considered. Since there is a wide range of finishes available, I re-coded the variable to include the five most common finishes with the exclusions grouped into 'other'. Here's a look at the counts for these groups.  
+
+```{r finish bar, echo=F}
+ggplot(pricetbl, aes(new.finish) ) + 
+  geom_bar() + 
+  theme_minimal() + 
+  labs(title="Finish",
+       subtitle = 'Stratocasters < $3000',
+       x = 'Finish',
+       y = 'Count')
+```
+
+Looking at the box plot below, we see that Natural and White finishes have the highest median value. It also appears that White has one of the highest ranges as well. The ANOVA for these groups has a highly significant p-value at 1.12e-09, meaning that there is a statistically significant difference in the mean values for the six groups. 
+
+```{r finish, echo=F}
+ggplot(pricetbl, aes(x=reorder(new.finish,price,FUN=median), y=price)) + 
+  geom_boxplot(varwidth = T) + 
+  theme_minimal() +
+  labs(title="Stratocasters < $3000", 
+       x="Finish",
+       y="Price")
+```
+```{r anova, echo=T}
+model2 <- lm(price ~ new.finish, data = pricetbl)
+anova(model2)
+```
+
+We can take this analysis a step further and look at the linear regression output for the model. We have overall model significance in the F-statistic and an R-squared of .082. While only 8.2% of the variance in price is explained by the finish, there are some interesting results in the coefficients. The Natural and White finishes, (which had the highest median prices) both have highly significant coefficients. All else equal, they could add \$891 and \$286 to the value of a guitar, respectively.
+
+```{r finish lm, echo=F}
+summary(model2)
+```
+
+##Condition and Price
+
+Another variable I thought would influence the value of these guitars is the condition. When posted for sale, used guitars are labelled Mint, Excellent, Very Good, Good, or Fair, and there is another category for new guitars. Below we can see a box plot exploring the median prices of these six categories as well as an ANOVA model comparing the means. 
+
+```{r condition viz, echo=F}
+ggplot(pricetbl %>% filter(condition %in% c('Mint (Used)','Excellent (Used)', 'Very Good (Used)', 'Good (Used)', 'Fair (Used)', 'Brand New (New)')), 
+       aes(x=reorder(condition,price,FUN=median), y=price)) + 
+  geom_boxplot(varwidth=T) + 
+  theme_minimal() +
+  labs(title="Fender Stratocasters < $3000", 
+       x="Condition",
+       y="Price")
+```
+```{r condition anova}
+anova(lm(price~condition, data = pricetbl))
+```
+
+According to the ANOVA model there is a statistically significant difference in means for the condition categories. In the box plot we can see that Good (Used) and Fair (Used) have the highest median prices. This isn't entirely surprising since we have seen that oldest, and therefore most used guitars, often tend to be more valuable than newer ones. Since there could be an interaction effect between age and condition, I expanded my ANOVA. 
+```{r interaction ANOVA}
+anova(lm(price~condition + age + condition:age, data = pricetbl))
+```
+
+We still see high significance from the condition variable as well as very high significance from age. There is a slight significance from the interaction term, which means that the effect of condition on price will vary at different ages for the guitars. 
+
+##Conclusion
+
+I think I've found some really interesting insights into the values of stratocasters that are being sold online. I plan to keep expanding my data set and gather more information on strats and on other models. This would help me test more hypotheses, since there are a few interesting variables like fret board material and pickup configuration that aren't always included in the postings. More data points would mean that I could better understand how to value electric guitars that are on the market. 
